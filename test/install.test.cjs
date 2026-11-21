@@ -59,7 +59,12 @@ test('PowerShell installer preserves other hook groups and is idempotent',
     assert.equal(content.hooks.Stop.length, 2);
     assert.deepEqual(content.hooks.Stop[0], original.hooks.Stop[0]);
     const command = content.hooks.Stop[1].hooks[0].command;
-    assert.ok(command.includes(path.join(runtime, 'hook.cjs')));
+    const registeredHook = command.match(/ -- "([^"]+)"$/)?.[1];
+    assert.ok(registeredHook, 'Expected a quoted Hook script path');
+    assert.equal(
+      fs.realpathSync.native(registeredHook),
+      fs.realpathSync.native(path.join(runtime, 'hook.cjs')),
+    );
     assert.equal(fs.existsSync(env.LOCALAPPDATA), false);
     const input = JSON.stringify({
       hook_event_name: 'Stop', session_id: 'a', turn_id: 't1', fixture: 'x'.repeat(65_536),
