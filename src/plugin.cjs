@@ -1,33 +1,20 @@
 'use strict';
 
+const { join } = require('node:path');
 const { connectDock, dockArguments } = require('./streamdock.cjs');
 const { prepareNavigation } = require('./navigate.cjs');
-const { eventServer, loadEndpoint, pipeAddress } = require('./pipe.cjs');
+const { listenForEvents } = require('./pipe.cjs');
 
 function start() {
-  let pipe;
-  let retry;
   const dock = connectDock(dockArguments(process.argv.slice(2)), {
     onClose() {
-      clearTimeout(retry);
-      pipe?.close();
+      pipe.close();
     },
   });
-
-  function listen() {
-    const endpoint = loadEndpoint();
-    if (!endpoint) {
-      retry = setTimeout(listen, 2_000).unref();
-      return;
-    }
-    pipe = eventServer(endpoint, dock.event);
-    pipe.server.on('error', () => {
-      process.stderr.write('Codex Status: the local event pipe could not be opened.\n');
-    });
-    pipe.server.listen(pipeAddress(endpoint));
-  }
-
-  listen();
+  const endpoint = join(__dirname, '..', 'hooks', 'endpoint.json');
+  const pipe = listenForEvents(endpoint, dock.event, () => {
+    process.stderr.write('Codex Status: the local event receiver could not start.\n');
+  });
   prepareNavigation();
 }
 

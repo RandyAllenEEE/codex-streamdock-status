@@ -38,6 +38,7 @@ async function build() {
   assert.equal(ACTION.split('.').slice(0, -1).join('.') + '.sdPlugin', PLUGIN);
 
   const { code, assets } = await ncc(path.join(ROOT, 'src', 'plugin.cjs'), {
+    cache: false,
     minify: false,
     sourceMap: false,
     target: 'es2022',
@@ -55,12 +56,15 @@ async function build() {
   add(pluginFiles, PLUGIN + '/static/status.png',
     renderKey({ state: 'running', active: 1, waiting: 0, failed: 0 }, 144, 144));
   add(pluginFiles, PLUGIN + '/plugin/index.js', code);
+  for (const filename of ['hook.cjs', 'events.cjs', 'pipe.cjs']) {
+    add(pluginFiles, PLUGIN + '/hooks/' + filename, read('src/' + filename));
+  }
   add(pluginFiles, PLUGIN + '/LICENCE', read('LICENCE'));
   add(pluginFiles, PLUGIN + '/THIRD_PARTY_NOTICES.txt', notice);
 
   const hookFiles = {};
   for (const relative of [
-    'scripts/hooks.ps1', 'src/hook.cjs', 'src/events.cjs', 'src/pipe.cjs', 'README.md', 'LICENCE',
+    'scripts/hooks.ps1', 'README.md', 'LICENCE',
   ]) {
     add(hookFiles, 'codex-streamdock-hooks/' + relative, read(relative));
   }

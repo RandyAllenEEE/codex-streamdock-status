@@ -5,12 +5,18 @@ param(
     [ValidateSet('Project', 'User')][string]$Scope = 'Project',
     [string]$ProjectRoot,
     [string]$StreamDockExecutable,
-    [string]$NodePath
+    [string]$NodePath,
+    [string]$PluginDirectory
 )
 
 $ErrorActionPreference = 'Stop'
-$runtimeRoot = Join-Path $env:LOCALAPPDATA 'CodexStreamDockStatus'
-$launcherPath = Join-Path $runtimeRoot 'emit.cmd'
+$pluginRoot = if ($PluginDirectory) {
+    [IO.Path]::GetFullPath($PluginDirectory)
+} else {
+    Join-Path $env:APPDATA 'HotSpot\StreamDock\plugins\com.randy.streamdock.codexstatus.sdPlugin'
+}
+$runtimeRoot = Join-Path $pluginRoot 'hooks'
+$runtimeHook = Join-Path $runtimeRoot 'hook.cjs'
 $endpointPath = Join-Path $runtimeRoot 'endpoint.json'
 $registeredEvents = @(
     'UserPromptSubmit', 'PermissionRequest', 'PreModelRequest',
@@ -61,7 +67,7 @@ function Resolve-NodeRuntime {
         $resolvedNode = Join-Path (Split-Path -Parent $hostExe) 'node\node20.exe'
         $resolvedNode = (Get-Item -LiteralPath $resolvedNode).FullName
     }
-    if ($resolvedNode -match '[%"!\r\n]') { throw 'The Node executable path is not suitable for the CMD launcher.' }
+    if ($resolvedNode -match '[%"!\^\r\n]') { throw 'The Node executable path cannot be quoted safely for the Hook command.' }
     $version = & $resolvedNode --version
     if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v(\d+\.\d+\.\d+)' -or
          [version]$Matches[1] -lt [version]'20.8.1') {
@@ -70,18 +76,21 @@ function Resolve-NodeRuntime {
     return $resolvedNode
 }
 
-if ($launcherPath -match '[%"!\r\n]') {
-    throw 'The local application data path is not suitable for the CMD launcher.'
+if ($runtimeHook -match '[%"!\^\r\n]') {
+    throw 'The plugin path cannot be quoted safely for the Hook command.'
 }
-$command = 'cmd.exe /d /s /c call "' + $launcherPath + '"'
-$launcherCommand = $command
-$runtimeHook = Join-Path $runtimeRoot 'hook.cjs'
-$commandSuffix = ' ' + $runtimeHook + ' ' + $endpointPath
+# The fixed entry point drains stdin if the plugin is absent during an update.
+$bootstrap = 'try{require(process.argv[1]).main()}catch(e){if(e.code===''MODULE_NOT_FOUND''){process.stdin.resume();process.stdin.on(''end'',console.log.bind(console,''{}''))}else{throw(e)}}'
+$commandSuffix = ' -e "' + $bootstrap + '" -- "' + $runtimeHook + '"'
+$legacyRoot = Join-Path $env:LOCALAPPDATA 'CodexStreamDockStatus'
+$legacyLauncher = 'cmd.exe /d /s /c call "' + (Join-Path $legacyRoot 'emit.cmd') + '"'
+$legacySuffix = ' ' + (Join-Path $legacyRoot 'hook.cjs') + ' ' + (Join-Path $legacyRoot 'endpoint.json')
 
 function Is-OwnedHandler($Handler) {
     if ($Handler.type -ne 'command') { return $false }
     foreach ($configured in @($Handler.command, $Handler.commandWindows)) {
-        if ($configured -is [string] -and ($configured -ceq $launcherCommand -or
+        if ($configured -is [string] -and ($configured -ceq $legacyLauncher -or
+            $configured.EndsWith($legacySuffix, [StringComparison]::OrdinalIgnoreCase) -or
             $configured.EndsWith($commandSuffix, [StringComparison]::OrdinalIgnoreCase))) {
             return $true
         }
@@ -128,41 +137,17 @@ if ($Action -eq 'Uninstall' -and $ownedCount -eq 0) {
 if (!$PSCmdlet.ShouldProcess($configPath, "$Action Codex Stream Dock Status hooks")) { return }
 
 if ($Action -eq 'Install') {
-    $nodeRuntime = Resolve-NodeRuntime
-    $barePaths = '^[A-Za-z0-9_:\\.\-]+$'
-    if ($nodeRuntime -match $barePaths -and $runtimeHook -match $barePaths -and $endpointPath -match $barePaths) {
-        $command = $nodeRuntime + $commandSuffix
-    }
-    $sourceRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    $sourceFiles = @('hook.cjs', 'events.cjs', 'pipe.cjs')
-    foreach ($sourceFile in $sourceFiles) {
-        if (!(Test-Path -LiteralPath (Join-Path $sourceRoot $sourceFile) -PathType Leaf)) {
-            throw "Missing Hook source: $sourceFile"
+    foreach ($sourceFile in @('hook.cjs', 'events.cjs', 'pipe.cjs')) {
+        if (!(Test-Path -LiteralPath (Join-Path $runtimeRoot $sourceFile) -PathType Leaf)) {
+            throw "Install the Codex Status Stream Dock plugin first. Missing $sourceFile in $runtimeRoot"
         }
     }
-    if (Test-Path -LiteralPath $endpointPath) {
-        $saved = Get-Content -LiteralPath $endpointPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($saved.token -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid endpoint.json token.' }
+    $nodeRuntime = Resolve-NodeRuntime
+    $command = if ($nodeRuntime -match '^[A-Za-z0-9_:\\.\-]+$') {
+        $nodeRuntime + $commandSuffix
+    } else {
+        'cmd.exe /d /s /v:off /c call "' + $nodeRuntime + '"' + $commandSuffix
     }
-    [void][IO.Directory]::CreateDirectory($runtimeRoot)
-    foreach ($sourceFile in $sourceFiles) {
-        $contents = [IO.File]::ReadAllText((Join-Path $sourceRoot $sourceFile))
-        Write-AtomicText (Join-Path $runtimeRoot $sourceFile) $contents
-    }
-    if (!(Test-Path -LiteralPath $endpointPath)) {
-        $random = [Security.Cryptography.RandomNumberGenerator]::Create()
-        try {
-            $bytes = New-Object byte[] 32
-            $random.GetBytes($bytes)
-        } finally { $random.Dispose() }
-        $token = [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
-        Write-AtomicText $endpointPath (@{ token = $token } | ConvertTo-Json -Compress)
-    }
-    $launcher = @('@echo off', 'setlocal DisableDelayedExpansion')
-    if ($nodeRuntime -match '[^\x00-\x7f]') { $launcher += 'chcp 65001 >nul' }
-    $launcher += '"' + $nodeRuntime + '" "%~dp0hook.cjs" "%~dp0endpoint.json"'
-    $launcher += 'exit /b %ERRORLEVEL%'
-    Write-AtomicText $launcherPath (($launcher -join "`r`n") + "`r`n")
 }
 
 foreach ($eventName in $registeredEvents) {

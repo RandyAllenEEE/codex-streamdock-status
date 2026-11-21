@@ -26,7 +26,7 @@ A Windows MiraBox Stream Dock plugin that shows local Codex activity on one LCD 
 
 ## 安装与卸载
 
-1. 解压 codex-streamdock-hooks.zip，保留其中的 scripts 和 src 目录。
+1. 解压 codex-streamdock-hooks.zip。这个压缩包提供 Hook 注册和卸载脚本。
 2. 打开 Stream Dock，使安装脚本能找到内置 Node。若应用已退出，使用 -StreamDockExecutable 指向 StreamDock.exe。
 3. 双击 com.randy.streamdock.codexstatus.sdPlugin 安装，在 Stream Dock 中将 **Codex Status** 拖到一个 LCD 键。
 4. 从解压目录执行以下命令。Project 方式适合先在独立目录中验证。User 方式适用于本 Windows 用户的本地 Codex 会话。
@@ -36,11 +36,13 @@ A Windows MiraBox Stream Dock plugin that shows local Codex activity on one LCD 
     .\scripts\hooks.ps1 -Action Install -Scope User
     ~~~
 
-    两条命令是可选的安装范围。日常使用选择其中一种，避免同一个 Hook 在两个范围重复触发。安装不需要管理员权限。可用 -WhatIf 查看计划写入的配置路径。
+    两条命令是可选的安装范围。日常使用选择其中一种，避免同一个 Hook 在两个范围重复触发。安装不需要管理员权限。可用 -WhatIf 查看计划写入的配置路径。如果插件位于自定义位置，用 -PluginDirectory 指定完整的 .sdPlugin 目录。
 
 5. 选择 Project 时，先在 ChatGPT 打开指定的本地工作区，并在客户端信任该工作区。项目级 Hooks 只在该工作区显示。选择 User 时可直接在 ChatGPT **设置 → Hooks** 中查看。审阅并信任新增命令后，开始一轮本地 Codex 对话。使用 -Action Status 和相同范围参数检查注册结果。
 
-卸载时在 Stream Dock 中移除 Codex Status，再用 -Action Uninstall 和安装时相同的范围参数清理 Hook 条目。脚本保留同文件中的其他 Hooks。确定所有范围均已卸载后，可以从 Windows 用户本地应用数据目录移除 CodexStreamDockStatus 文件夹。首次改动现有 hooks.json 时保留一份固定名称的备份，便于手工恢复。
+从 0.1.0 升级时，先更新 Stream Dock 插件，再用原有的范围参数重新运行新版安装脚本。它会替换该范围内旧版的 7 条命令。请在 Codex 里重新审阅并信任新命令。确认所有使用过的范围都已迁移后，可以删除旧的 %LOCALAPPDATA%\CodexStreamDockStatus 目录。以后在同一路径更新插件时，注册命令继续有效。
+
+卸载时用 -Action Uninstall 和安装时相同的范围及插件位置参数清理 Hook 条目，然后在 Stream Dock 中移除 Codex Status。脚本保留同文件中的其他 Hooks。首次改动现有 hooks.json 时保留一份固定名称的备份，便于手工恢复。
 
 ## 构建、测试和开发部署
 
@@ -63,11 +65,11 @@ npm run dev -- 'C:\path\to\StreamDock\plugins'
 
 ## 数据、开销和可观察范围
 
-- 命令 Hook 将事件类型、会话和轮次标识、时间及必要结果标志送往本机命名管道。插件只保存内存状态。固定安装文件位于 %LOCALAPPDATA%\CodexStreamDockStatus。
+- 命令 Hook 将事件类型、会话和轮次标识、时间及必要结果标志送往本机命名管道。发送脚本随 .sdPlugin 打包。插件启动时在同一目录的 hooks 子目录下重建固定大小的 endpoint.json。会话状态留在内存中。
 - 会话表最多 128 条，60 分钟没有新信号的会话退出活动计数。重启后从下一条可识别的 Hook 事件恢复显示。尚未收到 Hook 时显示 HOOK。
 - 通过 PermissionRequest 识别系统审批。批准后要等到同一轮下一次模型请求或终止事件，黄灯才会更新。普通提问、异步输入及云端会话取决于客户端事件覆盖，本版只声明系统审批支持。
 - 红灯跟踪模型请求失败，并给重试留出 15 秒。它的覆盖范围由 PostModelRequest 决定。客户端退出、系统休眠、或请求在没有新 Hook 的情况下长时间运行时，显示会在超时后回到空闲。
-- 每次 Hook 由一个 Node 短进程处理。插件退出时发送端在短超时内结束。用户数据中不会按事件产生文件。在 Stream Dock 3.10.205.0918 和内置 Node 20.8.1 上，对 64 KiB 输入做了 30 次命令链测量。接收端在线时中位数 108.6 ms，P95 112.5 ms。关闭接收端时 P95 111.6 ms，测试期间新增运行文件 0 个。10 次模型尝试的 20 个 Hook 按中位数合计约 2.17 秒。含空格的路径使用 CMD 兼容启动，额外开销以该机器实测为准。可用以下命令复测。
+- 每次 Hook 由一个 Node 短进程处理。插件退出或更新期间，Hook 会在短超时内结束，并允许 Codex 继续工作。在 Stream Dock 3.10.205.0918 和内置 Node 20.8.1 上，对 64 KiB 输入做了 30 次命令链测量。接收端在线时中位数 109.0 ms，P95 119.4 ms。关闭接收端时 P95 118.3 ms，测试期间新增运行文件 0 个。10 次模型尝试的 20 个 Hook 按中位数合计约 2.18 秒。Node 路径含空格时使用 CMD 兼容启动，额外开销以该机器实测为准。可用以下命令复测。
 
     ~~~powershell
     npm run benchmark -- 'C:\path\to\StreamDock\node\node20.exe'

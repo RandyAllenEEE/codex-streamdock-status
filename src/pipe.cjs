@@ -2,9 +2,7 @@
 
 const fs = require('node:fs');
 const net = require('node:net');
-const os = require('node:os');
-const path = require('node:path');
-const { timingSafeEqual } = require('node:crypto');
+const { randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
 const { isEvent } = require('./events.cjs');
 
 const MAX_FRAME_BYTES = 512;
@@ -12,12 +10,7 @@ const SEND_TIMEOUT_MS = 35;
 const MAX_CONNECTIONS = 32;
 const tokenPattern = /^[0-9a-f]{64}$/;
 
-function endpointPath() {
-  return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
-    'CodexStreamDockStatus', 'endpoint.json');
-}
-
-function loadEndpoint(filename = endpointPath()) {
+function loadEndpoint(filename) {
   try {
     const descriptor = fs.openSync(filename, 'r');
     try {
@@ -107,4 +100,23 @@ function eventServer(endpoint, consume) {
   };
 }
 
-module.exports = { endpointPath, loadEndpoint, pipeAddress, sendEvent, eventServer };
+function listenForEvents(filename, consume, onError) {
+  const endpoint = { token: randomBytes(32).toString('hex') };
+  const pipe = eventServer(endpoint, consume);
+  pipe.server.on('error', onError);
+  pipe.server.listen(pipeAddress(endpoint), () => {
+    const temporary = filename + '.' + randomUUID() + '.tmp';
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(endpoint), { flag: 'wx' });
+      fs.renameSync(temporary, filename);
+    } catch (error) {
+      pipe.close();
+      onError(error);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  });
+  return pipe;
+}
+
+module.exports = { loadEndpoint, pipeAddress, sendEvent, eventServer, listenForEvents };

@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const { performance } = require('node:perf_hooks');
 const { SessionMonitor } = require('../src/state.cjs');
-const { eventServer, loadEndpoint, pipeAddress } = require('../src/pipe.cjs');
+const { listenForEvents } = require('../src/pipe.cjs');
 
 const SAMPLE_COUNT = 30;
 const POWERSHELL = 'pwsh.exe';
@@ -58,35 +58,38 @@ async function run() {
   if (process.platform !== 'win32') throw new Error('This benchmark needs Windows.');
   const parent = fs.realpathSync(os.tmpdir());
   const root = fs.mkdtempSync(path.join(parent, 'codex-status-benchmark-'));
-  const env = { ...process.env, LOCALAPPDATA: path.join(root, 'local-data') };
   const projectRoot = path.join(root, 'test project');
+  const plugin = path.join(root, 'test plugin.sdPlugin');
+  const runtime = path.join(plugin, 'hooks');
   fs.mkdirSync(projectRoot);
+  fs.mkdirSync(runtime, { recursive: true });
+  for (const file of ['hook.cjs', 'events.cjs', 'pipe.cjs']) {
+    fs.copyFileSync(path.join(__dirname, '..', 'src', file), path.join(runtime, file));
+  }
   let pipe;
   try {
     const setup = spawnSync(POWERSHELL, [
       '-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'hooks.ps1'),
       '-Action', 'Install', '-ProjectRoot', projectRoot, '-NodePath', process.argv[2] || process.execPath,
-    ], { env, encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+      '-PluginDirectory', plugin,
+    ], { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
     if (setup.status !== 0) throw new Error(setup.stderr || setup.stdout || 'Benchmark fixture setup failed');
 
     const config = JSON.parse(fs.readFileSync(path.join(projectRoot, '.codex', 'hooks.json'), 'utf8'));
     const command = config.hooks.PreModelRequest[0].hooks[0].command;
-    const runtime = path.join(env.LOCALAPPDATA, 'CodexStreamDockStatus');
-    const endpoint = loadEndpoint(path.join(runtime, 'endpoint.json'));
-    const expectedFiles = fs.readdirSync(runtime).sort();
     const monitor = new SessionMonitor();
     let delivered = 0;
-    pipe = eventServer(endpoint, event => {
+    pipe = listenForEvents(path.join(runtime, 'endpoint.json'), event => {
       if (monitor.accept(event)) delivered += 1;
       monitor.view();
-    });
-    pipe.server.listen(pipeAddress(endpoint));
+    }, error => { throw error; });
     await once(pipe.server, 'listening');
+    const expectedFiles = fs.readdirSync(runtime).sort();
 
     async function sample() {
       const durations = [];
       for (let index = 0; index < SAMPLE_COUNT + 2; index += 1) {
-        const elapsed = await runCommand(command, payload, env);
+        const elapsed = await runCommand(command, payload);
         if (index >= 2) durations.push(elapsed);
       }
       return measure(durations);

@@ -6,7 +6,7 @@
   "Category": "Codex",
   "Icon": "static/status.png",
   "CategoryIcon": "static/status.png",
-  "Version": "0.1.0",
+  "Version": "0.2.0",
   "CodePath": "plugin/index.js",
   "CodePathWin": "plugin/index.js",
   "OS": [

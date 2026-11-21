@@ -1,6 +1,7 @@
 'use strict';
 
 const { performance } = require('node:perf_hooks');
+const { join } = require('node:path');
 const { hookEvent } = require('./events.cjs');
 const { loadEndpoint, sendEvent } = require('./pipe.cjs');
 
@@ -22,7 +23,7 @@ async function main() {
   try {
     const input = await readHook(process.stdin);
     const event = hookEvent(input, at);
-    const endpoint = event && loadEndpoint(process.argv[2]);
+    const endpoint = event && loadEndpoint(process.argv[2] || join(__dirname, 'endpoint.json'));
     if (endpoint) await sendEvent(endpoint, event);
   } catch {
     // A display integration cannot veto a Codex operation.
