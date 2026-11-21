@@ -18,6 +18,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Install Zig 0.15.2
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'streamdock-zig.zip'
+          $toolchain = Join-Path $env:RUNNER_TEMP 'streamdock-toolchain'
+          curl.exe -fLsS --retry 2 https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip -o $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $expected = '3A0ED1E8799A2F8CE2A6E6290A9FF22E6906F8227865911FB7DDEDC3CC14CB0C'
+          if ((Get-FileHash -LiteralPath $archive).Hash -ne $expected) { throw 'Zig archive hash mismatch.' }
+          New-Item -ItemType Directory -Path $toolchain | Out-Null
+          tar.exe -xf $archive -C $toolchain
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Join-Path $toolchain 'zig-x86_64-windows-0.15.2' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - run: npm run build
       - name: Verify bundled entry
         run: node --test test/package.test.cjs

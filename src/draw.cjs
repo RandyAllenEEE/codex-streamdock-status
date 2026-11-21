@@ -14,20 +14,14 @@ const glyphs = {
   '8': [14, 17, 17, 14, 17, 17, 14],
   '9': [14, 17, 17, 15, 1, 1, 14],
   '-': [0, 0, 0, 31, 0, 0, 0],
+  '/': [1, 1, 2, 4, 8, 16, 16],
   ' ': [0, 0, 0, 0, 0, 0, 0],
   A: [14, 17, 17, 31, 17, 17, 17],
   C: [14, 17, 16, 16, 16, 17, 14],
-  D: [30, 17, 17, 17, 17, 17, 30],
   E: [31, 16, 16, 30, 16, 16, 31],
-  H: [17, 17, 17, 31, 17, 17, 17],
   I: [14, 4, 4, 4, 4, 4, 14],
-  K: [17, 18, 20, 24, 20, 18, 17],
-  L: [16, 16, 16, 16, 16, 16, 31],
-  N: [17, 25, 21, 19, 17, 17, 17],
-  O: [14, 17, 17, 17, 17, 17, 14],
   R: [30, 17, 17, 30, 20, 18, 17],
   T: [31, 4, 4, 4, 4, 4, 4],
-  U: [17, 17, 17, 17, 17, 17, 14],
   W: [17, 17, 17, 21, 21, 21, 10],
 };
 
@@ -35,6 +29,7 @@ const palette = {
   unknown: [0x323940, 0xffffff],
   idle: [0x323940, 0xffffff],
   running: [0x006343, 0xffffff],
+  completed: [0x1264ae, 0xffffff],
   waiting: [0xffce57, 0x221702],
   error: [0xa01c32, 0xffffff],
 };
@@ -51,15 +46,15 @@ function rectangle(png, x, y, width, height, color) {
   }
 }
 
-function centeredText(png, line, top, scale, color) {
-  const width = (line.length * 6 - 1) * scale;
+function centeredText(png, line, top, scale, color, spacing = 1) {
+  const width = (line.length * (5 + spacing) - spacing) * scale;
   const left = Math.floor((png.width - width) / 2);
   for (let index = 0; index < line.length; index += 1) {
     const rows = glyphs[line[index]];
     for (let y = 0; y < 7; y += 1) {
       for (let x = 0; x < 5; x += 1) {
         if ((rows[y] & (16 >> x)) !== 0) {
-          rectangle(png, left + (index * 6 + x) * scale, top + y * scale, scale, scale, color);
+          rectangle(png, left + (index * (5 + spacing) + x) * scale, top + y * scale, scale, scale, color);
         }
       }
     }
@@ -69,9 +64,10 @@ function centeredText(png, line, top, scale, color) {
 function linesFor(view) {
   const count = String(view.active);
   switch (view.state) {
-    case 'unknown': return ['-', 'HOOK'];
-    case 'idle': return [count, 'IDLE'];
-    case 'running': return [count, 'RUN'];
+    case 'unknown': return ['-'];
+    case 'idle':
+    case 'running': return [count];
+    case 'completed': return [view.unviewed + '/' + count];
     case 'waiting': return [count, 'WAIT ' + view.waiting];
     case 'error': return [count, 'ERR ' + view.failed];
     default: throw new Error('Invalid display state');
@@ -85,6 +81,14 @@ function renderKey(view, rawWidth, rawHeight) {
   const [background, foreground] = palette[view.state];
   rectangle(image, 0, 0, width, height, background);
   const [number, fullLabel] = linesFor(view);
+  if (!fullLabel) {
+    const spacing = number.length * 6 - 1 > width - 4 ? 0 : 1;
+    const numberWidth = number.length * (5 + spacing) - spacing;
+    const usableHeight = Math.floor(height * 0.8);
+    const scale = Math.max(1, Math.min(Math.floor((width - 4) / numberWidth), Math.floor(usableHeight * 0.7 / 7)));
+    centeredText(image, number, Math.floor((usableHeight - 7 * scale) / 2), scale, foreground, spacing);
+    return PNG.sync.write(image, { colorType: 2, deflateLevel: 3 });
+  }
   const label = (fullLabel.length * 6 - 1) <= width - 4
     ? fullLabel : fullLabel.replace('WAIT', 'W').replace('ERR', 'E');
   const mainScale = Math.max(1,

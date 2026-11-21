@@ -7,6 +7,7 @@ const ncc = require('@vercel/ncc');
 const { zipSync, unzipSync } = require('fflate');
 const { renderKey } = require('../src/draw.cjs');
 const { ACTION } = require('../src/streamdock.cjs');
+const { buildForeground } = require('./build-native.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const PLUGIN = 'com.randy.streamdock.codexstatus.sdPlugin';
@@ -36,6 +37,7 @@ async function build() {
   assert.equal(manifest.Version, version);
   assert.equal(manifest.Actions[0].UUID, ACTION);
   assert.equal(ACTION.split('.').slice(0, -1).join('.') + '.sdPlugin', PLUGIN);
+  const foreground = buildForeground();
 
   const { code, assets } = await ncc(path.join(ROOT, 'src', 'plugin.cjs'), {
     cache: false,
@@ -56,6 +58,7 @@ async function build() {
   add(pluginFiles, PLUGIN + '/static/status.png',
     renderKey({ state: 'running', active: 1, waiting: 0, failed: 0 }, 144, 144));
   add(pluginFiles, PLUGIN + '/plugin/index.js', code);
+  add(pluginFiles, PLUGIN + '/plugin/foreground.node', foreground);
   for (const filename of ['hook.cjs', 'events.cjs', 'pipe.cjs']) {
     add(pluginFiles, PLUGIN + '/hooks/' + filename, read('src/' + filename));
   }

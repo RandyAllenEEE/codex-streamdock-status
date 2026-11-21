@@ -1,19 +1,22 @@
 # Codex Stream Dock Status
 
-用一颗 MiraBox LCD 按键看本地 Codex 会话是否在工作、是否需要处理。按键可返回 Windows ChatGPT 桌面应用，黄灯或红灯时优先打开对应会话。
+用一颗 MiraBox LCD 按键查看本地 Codex 的活动会话和完成提醒。按键可返回 Windows ChatGPT 桌面应用，蓝、黄、红灯时可打开对应会话。
 
 A Windows MiraBox Stream Dock plugin that shows local Codex activity on one LCD key and opens ChatGPT when pressed.
 
 ## 状态
 
-主数字始终表示**运行中和等待中的会话总数**。同时存在多个状态时，按红、黄、绿、灰显示。
+同时存在多个状态时，按红、黄、蓝、绿、灰显示。活动数包含运行中和等待中的会话。
 
-| 背景 | 小字 | 含义 | 短按 |
+| 背景 | 显示 | 含义 | 短按 |
 | --- | --- | --- | --- |
-| 绿 | RUN | 有会话正在运行 | 激活 ChatGPT |
-| 黄 | WAIT 数量 | 有会话等待系统审批 | 打开等待最久的会话 |
-| 红 | ERR 数量 | 模型请求失败持续 15 秒，期间未观察到重试或推进 | 打开最早出现未恢复失败的会话 |
-| 灰 | IDLE 或 HOOK | 0 表示空闲，横线表示插件启动后还未收到 Hook | 激活或启动 ChatGPT |
+| 绿 | 活动数，例如 2 | 有会话正在运行 | 激活 ChatGPT |
+| 蓝 | 待查看完成数/活动数，例如 1/2 | 有会话正常结束并等待查看 | 打开最早完成的一条会话并确认该条提醒 |
+| 黄 | 活动数和 WAIT 数量 | 有会话等待系统审批 | 打开等待最久的会话 |
+| 红 | 活动数和 ERR 数量 | 模型请求失败持续 15 秒，期间未观察到重试或推进 | 打开最早出现未恢复失败的会话 |
+| 灰 | 0 或横线 | 0 表示空闲，横线表示插件启动后还未收到 Hook | 激活或启动 ChatGPT |
+
+手动把 Codex 窗口切回前台会确认当前完成提醒。蓝键跳转只确认所打开的那条提醒。这个确认机制使用按键动作和 Windows 前台事件，和 Codex 侧栏的已读标记各自独立。按键标题可在 Stream Dock 的属性面板编辑，默认留空。
 
 达到红灯条件的会话暂时退出活动计数，重试时重新计入。按键采用 [Codex 官方深链接](https://learn.chatgpt.com/docs/app/commands#deep-links)。会话标识无法用于深链接、Windows 未注册对应协议或系统报告启动失败时，按键回到激活 ChatGPT 的路径。
 
@@ -22,7 +25,7 @@ A Windows MiraBox Stream Dock plugin that shows local Codex activity on one LCD 
 - Windows 10 或 11，带可分配 LCD 按键的 MiraBox 设备。
 - Stream Dock 3.10.205.0918 或更新版本。插件以 SDK 3 和 Stream Dock 内置 Node 20.8.1 为基线。
 - 支持 [官方命令 Hooks](https://learn.chatgpt.com/docs/hooks) 的 ChatGPT/Codex 桌面客户端。本项目跟踪发出本地 Hooks 的会话。
-- Hook 安装脚本和基准测试需要 PowerShell 7。从源码构建需要 Node.js 20.8.1 或更新版本和 npm。安装成品时，Hook 默认使用 Stream Dock 随附的 node20.exe。
+- Hook 安装脚本和基准测试需要 PowerShell 7。从源码构建需要 Windows、Node.js 20.8.1 或更新版本、npm 和 Zig 0.15.2。原生模块的架构与执行构建的 Node 一致，当前实测为 x64。安装成品时，Hook 默认使用 Stream Dock 随附的 node20.exe。
 
 ## 安装与卸载
 
@@ -55,6 +58,8 @@ node --test test/package.test.cjs
 
 构建结果在 release 目录。插件包是 Stream Dock 所需的同名包装目录 ZIP，Hook 包包含可独立运行的安装脚本。构建本身不安装插件或修改 Codex 配置。Windows CI 在干净检出中运行测试、构建并核验两个包。
 
+构建从 PATH 查找 zig.exe，也可通过 STREAMDOCK_ZIG 指定便携编译器的完整路径。首次构建下载并校验固定版本的 Node-API 头文件。编译缓存位于仓库的 build 目录。
+
 本机开发部署用 npm run dev。它只写入本项目的插件目录。也可以传入独立的测试插件目录。
 
 ~~~powershell
@@ -66,7 +71,8 @@ npm run dev -- 'C:\path\to\StreamDock\plugins'
 ## 数据、开销和可观察范围
 
 - 命令 Hook 将事件类型、会话和轮次标识、时间及必要结果标志送往本机命名管道。发送脚本随 .sdPlugin 打包。插件启动时在同一目录的 hooks 子目录下重建固定大小的 endpoint.json。会话状态留在内存中。
-- 会话表最多 128 条，60 分钟没有新信号的会话退出活动计数。重启后从下一条可识别的 Hook 事件恢复显示。尚未收到 Hook 时显示 HOOK。
+- 活动会话表和待查看完成表各最多 128 条。60 分钟没有新信号的会话退出活动计数。完成提醒在插件运行期间保存在内存中。重启后从下一条可识别的 Hook 事件恢复显示，初始显示横线。
+- 最后一次模型请求成功且随后收到同一轮 Stop 时，生成一条完成提醒。插件有可见按键和待查看项时，在同一个 Node 进程内注册 Windows 前台事件。所有提醒确认后撤销监听，线程在活动期间阻塞等待系统通知。
 - 通过 PermissionRequest 识别系统审批。批准后要等到同一轮下一次模型请求或终止事件，黄灯才会更新。普通提问、异步输入及云端会话取决于客户端事件覆盖，本版只声明系统审批支持。
 - 红灯跟踪模型请求失败，并给重试留出 15 秒。它的覆盖范围由 PostModelRequest 决定。客户端退出、系统休眠、或请求在没有新 Hook 的情况下长时间运行时，显示会在超时后回到空闲。
 - 每次 Hook 由一个 Node 短进程处理。插件退出或更新期间，Hook 会在短超时内结束，并允许 Codex 继续工作。在 Stream Dock 3.10.205.0918 和内置 Node 20.8.1 上，对 64 KiB 输入做了 30 次命令链测量。接收端在线时中位数 109.0 ms，P95 119.4 ms。关闭接收端时 P95 118.3 ms，测试期间新增运行文件 0 个。10 次模型尝试的 20 个 Hook 按中位数合计约 2.18 秒。Node 路径含空格时使用 CMD 兼容启动，额外开销以该机器实测为准。可用以下命令复测。
@@ -79,6 +85,7 @@ npm run dev -- 'C:\path\to\StreamDock\plugins'
 
 ## 验证记录
 
+- 0.3.0 的原生监听在 MiraBox Node 20.8.1 x64 上测量 30 次启停。启动 P95 为 0.129 ms，停止 P95 为 0.428 ms。加载模块并等待事件时，独立测试 Node 的私有提交增加约 0.36 MiB。监听启用时增加一个线程，注销后线程数恢复。约 4.5 秒无切换事件的采样中，进程 CPU 计时未增加。
 - 0.2.0 本机迁移后，Codex CLI 0.167.0-alpha.3.2 在项目内外都识别到 7 条已信任的用户级 Hook。一条临时会话中，UserPromptSubmit、PreModelRequest、PostModelRequest、Stop 均成功执行。Codex 报告的单次耗时为 325–363 ms，共 4 个样本。上一节的 119.4 ms P95 来自独立的命令链基准。
 - MiraBox N3 实机连接 Stream Dock 3.10.205.0918。使用合成事件核对绿 2、黄 2、红 1、灰 0。实体键已验证可以激活 ChatGPT，黄灯时可打开指定的验证会话。重启后显示未收到 Hook，收到新事件后恢复显示。
 - Codex CLI 0.167.0-alpha.3.2 的两条真实测试会话共发出并送达 14 条 Hook 事件，峰值活动计数 2。项目级 Hook 经客户端发现接口核验，全部 7 条识别成功。审批显示与失败延时使用合成事件验证。真实 CLI 测试没有产生系统审批提示，普通提问识别尚未启用。

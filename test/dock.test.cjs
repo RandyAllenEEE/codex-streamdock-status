@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 const { PNG } = require('pngjs');
-const { renderKey } = require('../src/draw.cjs');
+const { linesFor, renderKey } = require('../src/draw.cjs');
 const { ACTION, connectDock, createDockController, dockArguments } = require('../src/streamdock.cjs');
 const { SessionMonitor } = require('../src/state.cjs');
 const { openChatGPT, threadUri } = require('../src/navigate.cjs');
@@ -70,10 +70,55 @@ test('keyUp uses the current target while duplicate draws and repeated presses a
   assert.equal(visits.length, 1);
 });
 
+test('blue key confirms one completion and a later manual foreground entry confirms the rest', async t => {
+  let now = 1_000;
+  let enter;
+  let registrations = 0;
+  let unregistrations = 0;
+  const launched = [];
+  const monitor = new SessionMonitor({ clock: () => now });
+  const foreground = {
+    watch(callback) {
+      registrations += 1;
+      enter = callback;
+      return () => { unregistrations += 1; };
+    },
+    isForeground: () => false,
+  };
+  const dock = createDockController(() => true, {
+    monitor, foreground, draw: () => Buffer.from('image'),
+    navigate: async id => {
+      launched.push(id);
+      enter();
+      return true;
+    },
+  });
+  t.after(() => dock.close());
+  const key = { action: ACTION, context: 'key' };
+  const event = (kind, sessionId) => dock.event({ kind, sessionId, turnId: 'turn', at: ++now });
+  dock.action({ ...key, event: 'willAppear' });
+  event('start', 'still-running');
+  assert.equal(registrations, 0);
+  for (const id of ['first', 'second']) {
+    event('modelCompleted', id);
+    event('stop', id);
+  }
+  assert.equal(registrations, 1);
+  assert.deepEqual(linesFor(monitor.view()), ['2/1']);
+  dock.action({ ...key, event: 'keyUp' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(launched, ['first']);
+  assert.deepEqual(linesFor(monitor.view()), ['1/1']);
+  assert.equal(unregistrations, 0);
+  enter();
+  assert.deepEqual(linesFor(monitor.view()), ['1']);
+  assert.equal(unregistrations, 1);
+});
+
 test('renders all colors and wide counts at supported LCD sizes', () => {
-  for (const state of ['unknown', 'idle', 'running', 'waiting', 'error']) {
+  for (const state of ['unknown', 'idle', 'running', 'completed', 'waiting', 'error']) {
     for (const size of [40, 64, 96, 144]) {
-      const image = renderKey({ state, active: 128, waiting: 128, failed: 128 }, size, size);
+      const image = renderKey({ state, active: 128, waiting: 128, failed: 128, unviewed: 128 }, size, size);
       assert.equal(PNG.sync.read(image).width, size);
     }
   }
@@ -84,18 +129,18 @@ test('navigation uses direct Windows dispatch with a desktop activation fallback
   assert.equal(threadUri(id), 'codex://threads/' + id);
   assert.equal(threadUri('x?y=1'), null);
   const commands = [];
-  await openChatGPT(id, { execute: async (file, args) => { commands.push({ file, args }); } });
+  assert.equal(await openChatGPT(id, { execute: async (file, args) => { commands.push({ file, args }); } }), true);
   assert.equal(commands.length, 2);
   assert.match(commands[0].file, /reg\.exe$/i);
   assert.match(commands[1].file, /cmd\.exe$/i);
   assert.equal(commands[1].args.at(-1), 'start "" "codex://threads/' + id + '"');
 
   let script;
-  await openChatGPT(id, { execute: async (file, args) => {
+  assert.equal(await openChatGPT(id, { execute: async (file, args) => {
     if (file.endsWith('cmd.exe')) throw new Error('shell error');
     if (!file.endsWith('powershell.exe')) return;
     script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
-  } });
+  } }), false);
   assert.ok(script.includes('shell:AppsFolder\\'));
   assert.ok(!script.includes(id));
 });

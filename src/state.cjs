@@ -11,7 +11,7 @@ const terminal = new Set(['stop', 'interrupt', 'end']);
 function newSession(at) {
   return {
     turnId: null, retired: new Set(), updatedAt: at, phase: 'closed',
-    waitingAt: null, failureAt: null,
+    waitingAt: null, failureAt: null, modelCompleted: false,
   };
 }
 
@@ -25,6 +25,7 @@ function changeTurn(session, turnId) {
   session.turnId = turnId;
   session.waitingAt = null;
   session.failureAt = null;
+  session.modelCompleted = false;
 }
 
 class SessionMonitor {
@@ -35,6 +36,7 @@ class SessionMonitor {
     this.ttl = ttl;
     this.limit = limit;
     this.sessions = new Map();
+    this.unviewed = new Map();
     this.received = false;
   }
 
@@ -55,6 +57,26 @@ class SessionMonitor {
     const session = newSession(event.at);
     this.sessions.set(event.sessionId, session);
     return session;
+  }
+
+  recordCompletion(event) {
+    const earlier = this.unviewed.get(event.sessionId);
+    if (!earlier && this.unviewed.size >= this.limit) {
+      this.unviewed.delete(this.unviewed.keys().next().value);
+    }
+    this.unviewed.set(event.sessionId, {
+      sessionId: event.sessionId, at: earlier?.at ?? event.at,
+    });
+  }
+
+  acknowledge(completion = null) {
+    if (completion) {
+      return this.unviewed.get(completion.sessionId) === completion
+        && this.unviewed.delete(completion.sessionId);
+    }
+    if (!this.unviewed.size) return false;
+    this.unviewed.clear();
+    return true;
   }
 
   accept(event) {
@@ -89,6 +111,7 @@ class SessionMonitor {
         session.phase = 'running';
         session.waitingAt = null;
         session.failureAt = null;
+        session.modelCompleted = false;
         break;
       case 'approval':
         session.phase = 'waiting';
@@ -97,18 +120,25 @@ class SessionMonitor {
         break;
       case 'modelCompleted':
         session.failureAt = null;
+        session.modelCompleted = true;
         break;
       case 'modelFailed':
         if (session.phase === 'running') session.failureAt ??= event.at;
+        session.modelCompleted = false;
         break;
       case 'modelCancelled':
+        session.modelCompleted = false;
         break;
       case 'stop':
       case 'interrupt':
       case 'end':
+        if (event.kind === 'stop' && session.phase === 'running' && session.modelCompleted) {
+          this.recordCompletion(event);
+        }
         session.phase = 'closed';
         session.waitingAt = null;
         session.failureAt = null;
+        session.modelCompleted = false;
         break;
     }
     return true;
@@ -137,14 +167,22 @@ class SessionMonitor {
 
     const first = failed.length ? failed : waiting;
     first.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+    let completion = null;
+    if (!first.length) {
+      for (const entry of this.unviewed.values()) {
+        if (!completion || entry.at < completion.at) completion = entry;
+      }
+    }
 
     return {
       state: failed.length ? 'error' : waiting.length ? 'waiting'
-        : running ? 'running' : this.received ? 'idle' : 'unknown',
+        : completion ? 'completed' : running ? 'running' : this.received ? 'idle' : 'unknown',
       active: running + waiting.length,
       waiting: waiting.length,
       failed: failed.length,
-      targetSessionId: first[0]?.id ?? null,
+      unviewed: this.unviewed.size,
+      completion,
+      targetSessionId: first[0]?.id ?? completion?.sessionId ?? null,
       nextAt,
     };
   }

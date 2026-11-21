@@ -46,7 +46,7 @@ async function openChatGPT(sessionId, { execute = run } = {}) {
         await execute(path.join(system32, 'cmd.exe'), [
           '/d', '/s', '/c', 'start "" "' + uri + '"',
         ], { ...hidden, windowsVerbatimArguments: true });
-        return;
+        return true;
       } catch {
         if (execute === run) installedProtocol = undefined;
       }
@@ -55,6 +55,7 @@ async function openChatGPT(sessionId, { execute = run } = {}) {
     }
   }
   await activateChatGPT(execute);
+  return false;
 }
 
 module.exports = { threadUri, openChatGPT, prepareNavigation };

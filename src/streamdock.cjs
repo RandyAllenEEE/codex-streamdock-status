@@ -22,16 +22,42 @@ function dockArguments(args) {
 }
 
 function createDockController(send, { monitor = new SessionMonitor(),
-  navigate = openChatGPT, draw = renderKey } = {}) {
+  navigate = openChatGPT, draw = renderKey, foreground } = {}) {
   const keys = new Map();
   let nextUpdate;
   let lastPressAt = -Infinity;
   let navigating = false;
+  let watch;
+
+  function stopWatching() {
+    const previous = watch;
+    watch = undefined;
+    previous?.stop?.();
+  }
+
+  function syncForeground(unviewed) {
+    if (!unviewed || !keys.size) {
+      stopWatching();
+    } else if (foreground && !watch) {
+      const current = { ignoreNextEntry: false };
+      watch = current;
+      current.stop = foreground.watch(() => {
+        if (watch !== current) return;
+        if (current.ignoreNextEntry) {
+          current.ignoreNextEntry = false;
+          return;
+        }
+        if (monitor.acknowledge()) refresh();
+      });
+    }
+  }
 
   function refresh() {
     clearTimeout(nextUpdate);
     const view = monitor.view();
-    const visual = [view.state, view.active, view.waiting, view.failed].join(':');
+    syncForeground(view.unviewed);
+    const visual = [view.state, view.active, view.waiting, view.failed,
+      view.state === 'completed' ? view.unviewed : 0].join(':');
     const images = new Map();
     for (const [context, key] of keys) {
       if (visual === key.previous) continue;
@@ -57,13 +83,27 @@ function createDockController(send, { monitor = new SessionMonitor(),
       refresh();
     } else if (message.event === 'willDisappear') {
       keys.delete(context);
-      if (!keys.size) clearTimeout(nextUpdate);
+      if (!keys.size) {
+        clearTimeout(nextUpdate);
+        stopWatching();
+      }
     } else if (message.event === 'keyUp' && keys.has(context) && !navigating
       && monitor.clock() - lastPressAt >= 500) {
       lastPressAt = monitor.clock();
       navigating = true;
-      Promise.resolve().then(() => navigate(monitor.view().targetSessionId))
-        .catch(() => send({ event: 'showAlert', context }))
+      const view = monitor.view();
+      const current = watch;
+      // A foreground entry caused by this key must leave other reminders pending.
+      const protectEntry = current?.stop && !current.ignoreNextEntry && !foreground.isForeground();
+      if (protectEntry) current.ignoreNextEntry = true;
+      Promise.resolve().then(() => navigate(view.targetSessionId))
+        .then(openedThread => {
+          if (openedThread && view.completion && monitor.acknowledge(view.completion)) refresh();
+        })
+        .catch(() => {
+          if (protectEntry) current.ignoreNextEntry = false;
+          send({ event: 'showAlert', context });
+        })
         .finally(() => { navigating = false; });
     }
   }
@@ -76,18 +116,19 @@ function createDockController(send, { monitor = new SessionMonitor(),
     close() {
       clearTimeout(nextUpdate);
       keys.clear();
+      stopWatching();
     },
   };
 }
 
-function connectDock(config, { onClose, navigate, monitor } = {}) {
+function connectDock(config, { onClose, navigate, monitor, foreground } = {}) {
   const socket = new WebSocket('ws://127.0.0.1:' + config.port, { maxPayload: 1024 * 1024 });
   function send(message) {
     if (socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(message));
     return true;
   }
-  const dock = createDockController(send, { navigate, monitor });
+  const dock = createDockController(send, { navigate, monitor, foreground });
   socket.once('open', () => send({ event: config.registerEvent, uuid: config.pluginUUID }));
   socket.on('message', data => {
     let message;

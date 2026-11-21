@@ -6,7 +6,7 @@
   "Category": "Codex",
   "Icon": "static/status.png",
   "CategoryIcon": "static/status.png",
-  "Version": "0.2.0",
+  "Version": "0.3.0",
   "CodePath": "plugin/index.js",
   "CodePathWin": "plugin/index.js",
   "OS": [
@@ -25,18 +25,20 @@
     {
       "UUID": "com.randy.streamdock.codexstatus.status",
       "Name": "Codex Status",
-      "Tooltip": "Show active Codex sessions. Press to open ChatGPT.",
+      "Tooltip": "Show active and completed Codex sessions. Press to open ChatGPT or a session.",
       "Icon": "static/status.png",
       "Controllers": [
         "Keypad"
       ],
       "DisableAutomaticStates": true,
-      "UserTitleEnabled": false,
+      "UserTitleEnabled": true,
       "SupportedInMultiActions": false,
       "States": [
         {
           "Image": "static/status.png",
-          "ShowTitle": false
+          "ShowTitle": true,
+          "Title": "",
+          "TitleAlignment": "bottom"
         }
       ]
     }
