@@ -1,0 +1,10 @@
+{
+  "Name": "Codex 状态",
+  "Category": "Codex",
+  "Description": "显示本地 Codex 会话状态，按键返回 ChatGPT。",
+  "com.randy.streamdock.codexstatus.status": {
+    "Name": "Codex 状态",
+    "Tooltip": "显示活动会话数。按下返回 ChatGPT。"
+  },
+  "Localization": {}
+}

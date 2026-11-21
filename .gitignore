@@ -1,0 +1,13 @@
+/node_modules/
+/release/
+/coverage/
+/work/
+/.codex/
+/.idea/
+/.vscode/
+*.log
+*.tmp
+*.bak
+*.local.json
+.DS_Store
+Thumbs.db

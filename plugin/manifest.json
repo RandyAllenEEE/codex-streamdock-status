@@ -1,0 +1,44 @@
+{
+  "SDKVersion": 3,
+  "Author": "Randy",
+  "Name": "Codex Status",
+  "Description": "Show local Codex activity and return to ChatGPT.",
+  "Category": "Codex",
+  "Icon": "static/status.png",
+  "CategoryIcon": "static/status.png",
+  "Version": "0.1.0",
+  "CodePath": "plugin/index.js",
+  "CodePathWin": "plugin/index.js",
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "3.10.205.0918"
+  },
+  "Nodejs": {
+    "Version": "20"
+  },
+  "Actions": [
+    {
+      "UUID": "com.randy.streamdock.codexstatus.status",
+      "Name": "Codex Status",
+      "Tooltip": "Show active Codex sessions. Press to open ChatGPT.",
+      "Icon": "static/status.png",
+      "Controllers": [
+        "Keypad"
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "States": [
+        {
+          "Image": "static/status.png",
+          "ShowTitle": false
+        }
+      ]
+    }
+  ]
+}

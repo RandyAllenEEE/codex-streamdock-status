@@ -1,0 +1,82 @@
+{
+  "description": "Illustrative project-scoped Codex Stream Dock Status configuration. Run scripts/hooks.ps1 to install the local launcher and generate its absolute command.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PreModelRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PostModelRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /s /c call \"C:\\path\\to\\CodexStreamDockStatus\\emit.cmd\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ]
+  }
+}

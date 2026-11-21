@@ -1,0 +1,30 @@
+name: Windows
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.8.1
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Verify bundled entry
+        run: node --test test/package.test.cjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: codex-streamdock-status-windows
+          path: |
+            release/*.sdPlugin
+            release/codex-streamdock-hooks.zip
+          if-no-files-found: error
