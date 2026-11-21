@@ -79,6 +79,7 @@ npm run dev -- 'C:\path\to\StreamDock\plugins'
 
 ## 验证记录
 
+- 0.2.0 本机迁移后，Codex CLI 0.167.0-alpha.3.2 在项目内外都识别到 7 条已信任的用户级 Hook。一条临时会话中，UserPromptSubmit、PreModelRequest、PostModelRequest、Stop 均成功执行。Codex 报告的单次耗时为 325–363 ms，共 4 个样本。上一节的 119.4 ms P95 来自独立的命令链基准。
 - MiraBox N3 实机连接 Stream Dock 3.10.205.0918。使用合成事件核对绿 2、黄 2、红 1、灰 0。实体键已验证可以激活 ChatGPT，黄灯时可打开指定的验证会话。重启后显示未收到 Hook，收到新事件后恢复显示。
 - Codex CLI 0.167.0-alpha.3.2 的两条真实测试会话共发出并送达 14 条 Hook 事件，峰值活动计数 2。项目级 Hook 经客户端发现接口核验，全部 7 条识别成功。审批显示与失败延时使用合成事件验证。真实 CLI 测试没有产生系统审批提示，普通提问识别尚未启用。
 - 两次 Windows 派发对比中，原 PowerShell 路径为 324–363 ms，直接派发为 160–172 ms。这个数字是启动命令完成时间。新版在 N3 实体键上复测可打开同一会话。
