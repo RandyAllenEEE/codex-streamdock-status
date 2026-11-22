@@ -21,7 +21,8 @@ test('PowerShell installer preserves other hook groups and is idempotent',
     });
     const project = path.join(folder, 'test project');
     const config = path.join(project, '.codex', 'hooks.json');
-    const env = { ...process.env, LOCALAPPDATA: path.join(folder, 'local app data') };
+    const env = { ...process.env, LOCALAPPDATA: path.join(folder, 'local app data'),
+      CODEX_HOME: path.join(folder, 'codex user') };
     const plugin = path.join(folder, 'test plugin.sdPlugin');
     const runtime = path.join(plugin, 'hooks');
     fs.mkdirSync(runtime, { recursive: true });
@@ -33,6 +34,7 @@ test('PowerShell installer preserves other hook groups and is idempotent',
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: 'echo retained' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: 'echo also retained' }] }],
+        PreToolUse: [{ matcher: '^shell$', hooks: [{ type: 'command', command: 'echo tool retained' }] }],
       },
     };
     fs.mkdirSync(path.dirname(config), { recursive: true });
@@ -42,20 +44,25 @@ test('PowerShell installer preserves other hook groups and is idempotent',
     old.hooks.Stop.push({ hooks: [{ type: 'command', command: legacyLauncher }] });
     fs.writeFileSync(config, JSON.stringify(old));
 
-    function run(action) {
+    function run(action, scope = 'Project') {
       const result = spawnSync('pwsh.exe', [
         '-NoProfile', '-NonInteractive', '-File', installer,
-        '-Action', action, '-ProjectRoot', project, '-NodePath', process.execPath,
+        '-Action', action, '-Scope', scope, ...(scope === 'Project' ? ['-ProjectRoot', project] : []),
+        '-NodePath', process.execPath,
         '-PluginDirectory', plugin,
       ], { env, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
       assert.equal(result.status, 0, result.stderr || result.stdout);
+      return result.stdout;
     }
     run('Install');
     const firstInstall = fs.readFileSync(config, 'utf8');
     run('Install');
     assert.equal(fs.readFileSync(config, 'utf8'), firstInstall);
     const content = JSON.parse(firstInstall);
-    assert.equal(Object.keys(content.hooks).length, 8);
+    assert.equal(Object.keys(content.hooks).length, 10);
+    assert.deepEqual(content.hooks.PreToolUse[0], original.hooks.PreToolUse[0]);
+    assert.equal(content.hooks.PreToolUse[1].matcher, '^request_user_input$');
+    assert.equal(content.hooks.PostToolUse[0].matcher, '^request_user_input$');
     assert.equal(content.hooks.Stop.length, 2);
     assert.deepEqual(content.hooks.Stop[0], original.hooks.Stop[0]);
     const command = content.hooks.Stop[1].hooks[0].command;
@@ -84,4 +91,17 @@ test('PowerShell installer preserves other hook groups and is idempotent',
     fs.renameSync(plugin + '.old', plugin);
     run('Uninstall');
     assert.deepEqual(JSON.parse(fs.readFileSync(config, 'utf8')), original);
+
+    const user = path.join(env.CODEX_HOME, 'hooks.json');
+    fs.mkdirSync(env.CODEX_HOME);
+    const earlierUser = structuredClone(content);
+    earlierUser.hooks.PreToolUse.pop();
+    delete earlierUser.hooks.PostToolUse;
+    fs.writeFileSync(user, JSON.stringify(earlierUser));
+    assert.match(run('Status', 'User'), /hooks\.json\s+7\s+False/);
+    run('Install', 'User');
+    assert.deepEqual(JSON.parse(fs.readFileSync(user, 'utf8')), content);
+    assert.match(run('Status', 'User'), /hooks\.json\s+9\s+False/);
+    run('Uninstall', 'User');
+    assert.deepEqual(JSON.parse(fs.readFileSync(user, 'utf8')), original);
   });

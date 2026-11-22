@@ -77,6 +77,30 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^request_user_input$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\path\\to\\StreamDock\\node\\node20.exe -e \"try{require(process.argv[1]).main()}catch(e){if(e.code==='MODULE_NOT_FOUND'){process.stdin.resume();process.stdin.on('end',console.log.bind(console,'{}'))}else{throw(e)}}\" -- \"C:\\path\\to\\StreamDock\\plugins\\com.randy.streamdock.codexstatus.sdPlugin\\hooks\\hook.cjs\"",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^request_user_input$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\path\\to\\StreamDock\\node\\node20.exe -e \"try{require(process.argv[1]).main()}catch(e){if(e.code==='MODULE_NOT_FOUND'){process.stdin.resume();process.stdin.on('end',console.log.bind(console,'{}'))}else{throw(e)}}\" -- \"C:\\path\\to\\StreamDock\\plugins\\com.randy.streamdock.codexstatus.sdPlugin\\hooks\\hook.cjs\"",
+            "timeout": 1
+          }
+        ]
+      }
     ]
   }
 }

@@ -6,13 +6,28 @@ const FAIL_AFTER_MS = 15_000;
 const SESSION_TTL_MS = 60 * 60_000;
 const MAX_SESSIONS = 128;
 const MAX_OLD_TURNS = 16;
+const MAX_QUESTIONS = 32;
 const terminal = new Set(['stop', 'interrupt', 'end']);
 
 function newSession(at) {
   return {
     turnId: null, retired: new Set(), updatedAt: at, phase: 'closed',
-    waitingAt: null, failureAt: null, modelCompleted: false,
+    approvalAt: null, questions: null, failureAt: null, modelCompleted: false,
   };
+}
+
+function clearWaiting(session) {
+  session.approvalAt = null;
+  session.questions = null;
+}
+
+function waitingSince(session) {
+  if (session.phase === 'plan') return session.updatedAt;
+  let since = session.approvalAt ?? Infinity;
+  if (session.questions) {
+    for (const at of session.questions.values()) since = Math.min(since, at);
+  }
+  return since;
 }
 
 function changeTurn(session, turnId) {
@@ -23,7 +38,7 @@ function changeTurn(session, turnId) {
     }
   }
   session.turnId = turnId;
-  session.waitingAt = null;
+  clearWaiting(session);
   session.failureAt = null;
   session.modelCompleted = false;
 }
@@ -37,6 +52,7 @@ class SessionMonitor {
     this.limit = limit;
     this.sessions = new Map();
     this.unviewed = new Map();
+    this.completionVersion = 0;
     this.received = false;
   }
 
@@ -67,15 +83,33 @@ class SessionMonitor {
     this.unviewed.set(event.sessionId, {
       sessionId: event.sessionId, at: earlier?.at ?? event.at,
     });
+    this.completionVersion += 1;
   }
 
   acknowledge(completion = null) {
     if (completion) {
-      return this.unviewed.get(completion.sessionId) === completion
-        && this.unviewed.delete(completion.sessionId);
+      if (this.unviewed.get(completion.sessionId) !== completion) return false;
+      this.unviewed.delete(completion.sessionId);
+    } else {
+      if (!this.unviewed.size) return false;
+      this.unviewed.clear();
     }
-    if (!this.unviewed.size) return false;
-    this.unviewed.clear();
+    this.completionVersion += 1;
+    return true;
+  }
+
+  isCheckingPlan(event) {
+    const session = this.sessions.get(event.sessionId);
+    return session?.phase === 'planCheck' && session.turnId === event.turnId
+      && session.updatedAt === event.at;
+  }
+
+  resolvePlan(event, planned) {
+    this.prune();
+    if (!this.isCheckingPlan(event)) return false;
+    const session = this.sessions.get(event.sessionId);
+    session.phase = planned ? 'plan' : 'closed';
+    if (!planned) this.recordCompletion(event);
     return true;
   }
 
@@ -88,12 +122,19 @@ class SessionMonitor {
     if (session) {
       if (event.at <= session.updatedAt || session.retired.has(event.turnId)) return false;
       const sameTurn = session.turnId === event.turnId;
-      if (event.turnId && !sameTurn && session.turnId
-        && (terminal.has(event.kind) || (session.phase !== 'closed' && event.kind !== 'start'))) {
-        return false;
+      const stopped = session.phase !== 'running';
+      if (event.kind === 'questionEnd'
+        && (!sameTurn || !session.questions?.has(event.toolUseId))) return false;
+      if (event.turnId && session.turnId) {
+        if (sameTurn && stopped
+          && (event.kind !== 'interrupt' || session.phase === 'closed')) return false;
+        if (!sameTurn && event.kind !== 'start') {
+          const resumesPlan = stopped && event.kind === 'modelStart';
+          if (terminal.has(event.kind) || (!resumesPlan && session.phase !== 'closed')) return false;
+        }
       }
-      if (event.turnId && sameTurn && session.phase === 'closed') return false;
     } else {
+      if (event.kind === 'questionEnd') return false;
       session = this.reserve(event);
       if (!session) return false;
     }
@@ -109,21 +150,31 @@ class SessionMonitor {
       case 'start':
       case 'modelStart':
         session.phase = 'running';
-        session.waitingAt = null;
+        clearWaiting(session);
         session.failureAt = null;
         session.modelCompleted = false;
         break;
       case 'approval':
-        session.phase = 'waiting';
-        session.waitingAt ??= event.at;
+        session.approvalAt ??= event.at;
         session.failureAt = null;
+        break;
+      case 'questionStart':
+        session.questions ??= new Map();
+        if (session.questions.size < MAX_QUESTIONS && !session.questions.has(event.toolUseId)) {
+          session.questions.set(event.toolUseId, event.at);
+        }
+        session.failureAt = null;
+        break;
+      case 'questionEnd':
+        session.questions.delete(event.toolUseId);
+        if (!session.questions.size) session.questions = null;
         break;
       case 'modelCompleted':
         session.failureAt = null;
         session.modelCompleted = true;
         break;
       case 'modelFailed':
-        if (session.phase === 'running') session.failureAt ??= event.at;
+        if (waitingSince(session) === Infinity) session.failureAt ??= event.at;
         session.modelCompleted = false;
         break;
       case 'modelCancelled':
@@ -132,11 +183,12 @@ class SessionMonitor {
       case 'stop':
       case 'interrupt':
       case 'end':
-        if (event.kind === 'stop' && session.phase === 'running' && session.modelCompleted) {
-          this.recordCompletion(event);
-        }
         session.phase = 'closed';
-        session.waitingAt = null;
+        if (event.kind === 'stop' && session.modelCompleted && waitingSince(session) === Infinity) {
+          if (event.transcriptPath) session.phase = 'planCheck';
+          else this.recordCompletion(event);
+        }
+        clearWaiting(session);
         session.failureAt = null;
         session.modelCompleted = false;
         break;
@@ -152,13 +204,14 @@ class SessionMonitor {
     let nextAt = Infinity;
 
     for (const [id, record] of this.sessions) {
-      if (record.phase === 'closed') continue;
+      if (record.phase === 'closed' || record.phase === 'planCheck') continue;
       nextAt = Math.min(nextAt, record.updatedAt + this.ttl);
       const failAt = record.failureAt === null ? Infinity : record.failureAt + this.failAfter;
+      const waitingAt = waitingSince(record);
       if (failAt <= now) {
         failed.push({ id, at: record.failureAt });
-      } else if (record.phase === 'waiting') {
-        waiting.push({ id, at: record.waitingAt });
+      } else if (waitingAt !== Infinity) {
+        waiting.push({ id, at: waitingAt });
       } else {
         running += 1;
         nextAt = Math.min(nextAt, failAt);
@@ -178,6 +231,7 @@ class SessionMonitor {
       state: failed.length ? 'error' : waiting.length ? 'waiting'
         : completion ? 'completed' : running ? 'running' : this.received ? 'idle' : 'unknown',
       active: running + waiting.length,
+      running,
       waiting: waiting.length,
       failed: failed.length,
       unviewed: this.unviewed.size,

@@ -22,7 +22,7 @@ function dockArguments(args) {
 }
 
 function createDockController(send, { monitor = new SessionMonitor(),
-  navigate = openChatGPT, draw = renderKey, foreground } = {}) {
+  navigate = openChatGPT, draw = renderKey, foreground, watchUnread, planReader } = {}) {
   const keys = new Map();
   let nextUpdate;
   let lastPressAt = -Infinity;
@@ -33,22 +33,35 @@ function createDockController(send, { monitor = new SessionMonitor(),
     const previous = watch;
     watch = undefined;
     previous?.stop?.();
+    previous?.desktop?.stop();
   }
 
   function syncForeground(unviewed) {
     if (!unviewed || !keys.size) {
       stopWatching();
-    } else if (foreground && !watch) {
-      const current = { ignoreNextEntry: false };
+    } else if ((foreground || watchUnread) && !watch) {
+      const current = { ignoreUntil: -Infinity, version: monitor.completionVersion };
       watch = current;
-      current.stop = foreground.watch(() => {
-        if (watch !== current) return;
-        if (current.ignoreNextEntry) {
-          current.ignoreNextEntry = false;
-          return;
+      current.desktop = watchUnread?.(() => monitor.unviewed, entries => {
+        let changed = false;
+        for (const entry of entries) {
+          if (monitor.acknowledge(entry)) changed = true;
         }
-        if (monitor.acknowledge()) refresh();
+        if (changed) refresh();
       });
+      current.stop = foreground?.watch(() => {
+        if (watch !== current) return;
+        const ignore = monitor.clock() < current.ignoreUntil;
+        current.ignoreUntil = -Infinity;
+        if (current.desktop && current.desktop.available !== false) {
+          current.desktop.refresh();
+        } else if (!ignore && monitor.acknowledge()) {
+          refresh();
+        }
+      });
+    } else if (watch?.desktop && watch.version !== monitor.completionVersion) {
+      watch.version = monitor.completionVersion;
+      watch.desktop.refresh();
     }
   }
 
@@ -56,8 +69,8 @@ function createDockController(send, { monitor = new SessionMonitor(),
     clearTimeout(nextUpdate);
     const view = monitor.view();
     syncForeground(view.unviewed);
-    const visual = [view.state, view.active, view.waiting, view.failed,
-      view.state === 'completed' ? view.unviewed : 0].join(':');
+    const visual = [view.state, view.running, view.state === 'waiting' ? view.waiting
+      : view.state === 'error' ? view.failed : view.state === 'completed' ? view.unviewed : 0].join(':');
     const images = new Map();
     for (const [context, key] of keys) {
       if (visual === key.previous) continue;
@@ -94,14 +107,15 @@ function createDockController(send, { monitor = new SessionMonitor(),
       const view = monitor.view();
       const current = watch;
       // A foreground entry caused by this key must leave other reminders pending.
-      const protectEntry = current?.stop && !current.ignoreNextEntry && !foreground.isForeground();
-      if (protectEntry) current.ignoreNextEntry = true;
+      const protectEntry = current?.stop && lastPressAt >= current.ignoreUntil && !foreground.isForeground();
+      const ignoreUntil = lastPressAt + 1_000;
+      if (protectEntry) current.ignoreUntil = ignoreUntil;
       Promise.resolve().then(() => navigate(view.targetSessionId))
         .then(openedThread => {
           if (openedThread && view.completion && monitor.acknowledge(view.completion)) refresh();
         })
         .catch(() => {
-          if (protectEntry) current.ignoreNextEntry = false;
+          if (protectEntry && current.ignoreUntil === ignoreUntil) current.ignoreUntil = -Infinity;
           send({ event: 'showAlert', context });
         })
         .finally(() => { navigating = false; });
@@ -111,24 +125,35 @@ function createDockController(send, { monitor = new SessionMonitor(),
   return {
     action,
     event(event) {
-      if (monitor.accept(event)) refresh();
+      if (!monitor.accept(event)) return;
+      if (monitor.isCheckingPlan(event)) {
+        if (planReader) {
+          planReader.classify(event, () => monitor.isCheckingPlan(event), planned => {
+            if (monitor.resolvePlan(event, planned)) refresh();
+          });
+        } else {
+          monitor.resolvePlan(event, false);
+        }
+      }
+      refresh();
     },
     close() {
       clearTimeout(nextUpdate);
       keys.clear();
       stopWatching();
+      planReader?.close();
     },
   };
 }
 
-function connectDock(config, { onClose, navigate, monitor, foreground } = {}) {
+function connectDock(config, { onClose, navigate, monitor, foreground, watchUnread, planReader } = {}) {
   const socket = new WebSocket('ws://127.0.0.1:' + config.port, { maxPayload: 1024 * 1024 });
   function send(message) {
     if (socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(message));
     return true;
   }
-  const dock = createDockController(send, { navigate, monitor, foreground });
+  const dock = createDockController(send, { navigate, monitor, foreground, watchUnread, planReader });
   socket.once('open', () => send({ event: config.registerEvent, uuid: config.pluginUUID }));
   socket.on('message', data => {
     let message;

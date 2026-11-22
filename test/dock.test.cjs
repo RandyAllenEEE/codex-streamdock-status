@@ -118,10 +118,41 @@ test('blue key confirms one completion and a later manual foreground entry confi
 test('renders all colors and wide counts at supported LCD sizes', () => {
   for (const state of ['unknown', 'idle', 'running', 'completed', 'waiting', 'error']) {
     for (const size of [40, 64, 96, 144]) {
-      const image = renderKey({ state, active: 128, waiting: 128, failed: 128, unviewed: 128 }, size, size);
+      const image = renderKey({ state, running: 128, waiting: 128, failed: 128, unviewed: 128 }, size, size);
       assert.equal(PNG.sync.read(image).width, size);
     }
   }
+});
+
+test('red and yellow use the normal running count in a single line', () => {
+  const view = { running: 2, waiting: 1, failed: 3 };
+  assert.deepEqual(linesFor({ ...view, state: 'waiting' }), ['1/2']);
+  assert.deepEqual(linesFor({ ...view, state: 'error' }), ['3/2']);
+  assert.deepEqual(linesFor({ ...view, state: 'waiting', running: 0 }), ['1/0']);
+});
+
+test('an unused key navigation suppression expires before a later manual foreground entry', async t => {
+  let now = 1_000;
+  let enter;
+  const monitor = new SessionMonitor({ clock: () => now });
+  const dock = createDockController(() => true, {
+    monitor, draw: () => Buffer.from('image'), navigate: async () => true,
+    foreground: { watch(callback) { enter = callback; return () => {}; }, isForeground: () => false },
+  });
+  t.after(() => dock.close());
+  const key = { action: ACTION, context: 'key' };
+  dock.action({ ...key, event: 'willAppear' });
+  for (const sessionId of ['first', 'second']) {
+    for (const kind of ['modelCompleted', 'stop']) {
+      dock.event({ kind, sessionId, turnId: 'turn', at: ++now });
+    }
+  }
+  dock.action({ ...key, event: 'keyUp' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(monitor.view().unviewed, 1);
+  now += 1_001;
+  enter();
+  assert.equal(monitor.view().unviewed, 0);
 });
 
 test('navigation uses direct Windows dispatch with a desktop activation fallback', async () => {

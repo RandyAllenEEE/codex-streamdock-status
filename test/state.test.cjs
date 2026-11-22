@@ -33,7 +33,7 @@ test('parallel sessions count once, with approval before running and oldest firs
   r.send('approval', 'b');
   r.send('modelCompleted', 'b');
   assert.deepEqual(r.view(), {
-    state: 'waiting', active: 2, waiting: 2, failed: 0, unviewed: 0, completion: null, targetSessionId: 'b',
+    state: 'waiting', active: 2, running: 0, waiting: 2, failed: 0, unviewed: 0, completion: null, targetSessionId: 'b',
   });
   r.send('modelStart', 'b');
   assert.equal(r.view().targetSessionId, 'a');
@@ -57,7 +57,7 @@ test('failed requests debounce, override waiting, and clear when retried', () =>
   r.send('approval', 'b');
   r.advance(FAIL_AFTER_MS);
   assert.deepEqual(r.view(), {
-    state: 'error', active: 1, waiting: 1, failed: 1, unviewed: 0, completion: null, targetSessionId: 'a',
+    state: 'error', active: 1, running: 0, waiting: 1, failed: 1, unviewed: 0, completion: null, targetSessionId: 'a',
   });
   r.send('modelStart');
   assert.equal(r.view().state, 'waiting');
@@ -154,4 +154,43 @@ test('projection drops arbitrary input and subagent work', () => {
   assert.equal(hookEvent({ ...sample, turn_id: undefined }, 2), null);
   assert.deepEqual(hookEvent({ ...sample, hook_event_name: 'PostModelRequest', status: 'failed' }, 2),
     { kind: 'modelFailed', sessionId: 'a', turnId: 't1', at: 2 });
+});
+
+test('only matching answers remove each question, leaving other waits in place', () => {
+  let now = 1_000;
+  const monitor = new SessionMonitor({ clock: () => now });
+  const signal = (kind, extra = {}) => monitor.accept({
+    kind, sessionId: 'a', turnId: 't1', at: ++now, ...extra,
+  });
+  const question = (kind, id) => signal(kind, { toolUseId: id });
+  signal('approval');
+  question('questionStart', 'first');
+  question('questionStart', 'second');
+  assert.equal(monitor.view().waiting, 1);
+  assert.equal(signal('questionEnd', { toolUseId: 'first', turnId: 'old' }), false);
+  assert.equal(question('questionEnd', 'unknown'), false);
+  question('questionEnd', 'first');
+  assert.equal(monitor.view().waiting, 1);
+  question('questionEnd', 'second');
+  assert.equal(monitor.view().waiting, 1);
+  signal('modelStart');
+  assert.equal(monitor.view().running, 1);
+  question('questionStart', 'third');
+  question('questionEnd', 'third');
+  assert.equal(monitor.view().running, 1);
+});
+
+test('the sender includes only question identifiers and a bounded Stop path', () => {
+  const input = { session_id: 'a', turn_id: 't1', tool_name: 'request_user_input',
+    tool_use_id: 'call_a', tool_input: { questions: ['private'] }, tool_response: 'private' };
+  for (const [hook_event_name, kind] of [['PreToolUse', 'questionStart'], ['PostToolUse', 'questionEnd']]) {
+    assert.deepEqual(hookEvent({ ...input, hook_event_name }, 1), {
+      kind, sessionId: 'a', turnId: 't1', toolUseId: 'call_a', at: 1,
+    });
+    assert.equal(hookEvent({ ...input, hook_event_name, tool_name: 'request_user_input_async' }), null);
+    assert.equal(hookEvent({ ...input, hook_event_name, tool_use_id: undefined }), null);
+  }
+  const stop = { ...input, hook_event_name: 'Stop', transcript_path: 'C:\\sessions\\rollout-a.jsonl' };
+  assert.equal(hookEvent(stop, 2).transcriptPath, stop.transcript_path);
+  assert.equal(hookEvent({ ...stop, transcript_path: 'x'.repeat(1025) }, 2).transcriptPath, undefined);
 });

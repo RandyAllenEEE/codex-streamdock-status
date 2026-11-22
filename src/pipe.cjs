@@ -5,7 +5,7 @@ const net = require('node:net');
 const { randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
 const { isEvent } = require('./events.cjs');
 
-const MAX_FRAME_BYTES = 512;
+const MAX_FRAME_BYTES = 4096;
 const SEND_TIMEOUT_MS = 35;
 const MAX_CONNECTIONS = 32;
 const tokenPattern = /^[0-9a-f]{64}$/;

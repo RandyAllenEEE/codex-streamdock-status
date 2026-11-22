@@ -56,7 +56,7 @@ async function build() {
   add(pluginFiles, PLUGIN + '/manifest.json', read('plugin/manifest.json'));
   add(pluginFiles, PLUGIN + '/zh_CN.json', read('plugin/zh_CN.json'));
   add(pluginFiles, PLUGIN + '/static/status.png',
-    renderKey({ state: 'running', active: 1, waiting: 0, failed: 0 }, 144, 144));
+    renderKey({ state: 'running', running: 1 }, 144, 144));
   add(pluginFiles, PLUGIN + '/plugin/index.js', code);
   add(pluginFiles, PLUGIN + '/plugin/foreground.node', foreground);
   for (const filename of ['hook.cjs', 'events.cjs', 'pipe.cjs']) {

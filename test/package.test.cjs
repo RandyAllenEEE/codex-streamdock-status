@@ -44,6 +44,8 @@ test('the packaged receiver rotates its endpoint and the bundled sender updates 
       writeFileSync(filename, data);
     }
     const plugin = join(folder, name);
+    const codexHome = join(folder, 'codex');
+    mkdirSync(codexHome);
     const endpoint = join(plugin, 'hooks', 'endpoint.json');
     const sender = join(plugin, 'hooks', 'hook.cjs');
     const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -79,7 +81,7 @@ test('the packaged receiver rotates its endpoint and the bundled sender updates 
       child = spawn(process.execPath, [
         join(plugin, manifest.CodePathWin), '-port', String(server.address().port),
         '-pluginUUID', uuid, '-registerEvent', 'registerPlugin',
-      ], { windowsHide: true });
+      ], { windowsHide: true, env: { ...process.env, CODEX_HOME: codexHome } });
       let errors = '';
       child.stderr.on('data', data => { errors += data; });
       exited = once(child, 'close');

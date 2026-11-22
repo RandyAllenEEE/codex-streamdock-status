@@ -20,7 +20,7 @@ $runtimeHook = Join-Path $runtimeRoot 'hook.cjs'
 $endpointPath = Join-Path $runtimeRoot 'endpoint.json'
 $registeredEvents = @(
     'UserPromptSubmit', 'PermissionRequest', 'PreModelRequest',
-    'PostModelRequest', 'Stop', 'Interrupt', 'SessionEnd'
+    'PostModelRequest', 'Stop', 'Interrupt', 'SessionEnd', 'PreToolUse', 'PostToolUse'
 )
 
 if ($Scope -eq 'Project') {
@@ -163,9 +163,13 @@ foreach ($eventName in $registeredEvents) {
         }
     }
     if ($Action -eq 'Install') {
-        $groups.Add([pscustomobject]@{
+        $group = [pscustomobject]@{
             hooks = @([pscustomobject]@{ type = 'command'; command = $command; timeout = 1 })
-        })
+        }
+        if ($eventName -in @('PreToolUse', 'PostToolUse')) {
+            $group | Add-Member -NotePropertyName matcher -NotePropertyValue '^request_user_input$'
+        }
+        $groups.Add($group)
     }
     if ($null -ne $entry) { $config.hooks.PSObject.Properties.Remove($eventName) }
     if ($groups.Count -gt 0) {
