@@ -44,15 +44,27 @@ test('PowerShell installer preserves other hook groups and is idempotent',
     old.hooks.Stop.push({ hooks: [{ type: 'command', command: legacyLauncher }] });
     fs.writeFileSync(config, JSON.stringify(old));
 
-    function run(action, scope = 'Project') {
+    function invokePowerShell(arguments_, extraEnv = {}) {
       const result = spawnSync('pwsh.exe', [
-        '-NoProfile', '-NonInteractive', '-File', installer,
-        '-Action', action, '-Scope', scope, ...(scope === 'Project' ? ['-ProjectRoot', project] : []),
-        '-NodePath', process.execPath,
-        '-PluginDirectory', plugin,
-      ], { env, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
+        '-NoProfile', '-NonInteractive', ...arguments_,
+      ], { env: { ...env, ...extraEnv }, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
       assert.equal(result.status, 0, result.stderr || result.stdout);
       return result.stdout;
+    }
+
+    function run(action, scope = 'Project') {
+      invokePowerShell([
+        '-File', installer, '-Action', action, '-Scope', scope,
+        ...(scope === 'Project' ? ['-ProjectRoot', project] : []),
+        '-NodePath', process.execPath, '-PluginDirectory', plugin,
+      ]);
+    }
+
+    function userStatus() {
+      return JSON.parse(invokePowerShell([
+        '-Command',
+        '& $env:CODEX_TEST_INSTALLER -Action Status -Scope User -PluginDirectory $env:CODEX_TEST_PLUGIN | ConvertTo-Json -Compress',
+      ], { CODEX_TEST_INSTALLER: installer, CODEX_TEST_PLUGIN: plugin }));
     }
     run('Install');
     const firstInstall = fs.readFileSync(config, 'utf8');
@@ -98,10 +110,10 @@ test('PowerShell installer preserves other hook groups and is idempotent',
     earlierUser.hooks.PreToolUse.pop();
     delete earlierUser.hooks.PostToolUse;
     fs.writeFileSync(user, JSON.stringify(earlierUser));
-    assert.match(run('Status', 'User'), /hooks\.json\s+7\s+False/);
+    assert.equal(userStatus().RegisteredHandlers, 7);
     run('Install', 'User');
     assert.deepEqual(JSON.parse(fs.readFileSync(user, 'utf8')), content);
-    assert.match(run('Status', 'User'), /hooks\.json\s+9\s+False/);
+    assert.equal(userStatus().RegisteredHandlers, 9);
     run('Uninstall', 'User');
     assert.deepEqual(JSON.parse(fs.readFileSync(user, 'utf8')), original);
   });
